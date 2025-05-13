@@ -128,6 +128,12 @@
                     <option value="">Select a database</option>
                 </select>
             </div>
+            <div class="form-group hidden" id="schemaGroup">
+                <label for="schemaName">Schema Name</label>
+                <select id="schemaName" name="schemaName" required>
+                    <option value="">Select a schema</option>
+                </select>
+            </div>
             <div class="form-group hidden" id="tableGroup">
                 <label for="tableName">Table Name</label>
                 <select id="tableName" name="tableName" required>
@@ -142,7 +148,7 @@
     <script>
         $(document).ready(function() {
             // Initialize Select2 for searchable dropdowns
-            $('#dbName, #tableName').select2({
+            $('#dbName, #schemaName, #tableName').select2({
                 width: '100%',
                 placeholder: 'Type to search...',
                 allowClear: true
@@ -165,16 +171,47 @@
                 }
             });
 
-            // Fetch table names when a database is selected
+            // Fetch schema names when a database is selected
             $('#dbName').on('change', function() {
                 const dbName = $(this).val();
+                const schemaGroup = $('#schemaGroup');
+                const schemaSelect = $('#schemaName');
+                const tableGroup = $('#tableGroup');
+                schemaSelect.empty().append('<option value="">Select a schema</option>');
+                tableGroup.addClass('hidden'); // Hide table dropdown
+
+                if (dbName) {
+                    $.ajax({
+                        url: `/schemas/${dbName}`,
+                        type: 'GET',
+                        success: function(response) {
+                            response.schemas.forEach(function(schema) {
+                                schemaSelect.append(`<option value="${schema}">${schema}</option>`);
+                            });
+                            schemaSelect.trigger('change'); // Refresh Select2
+                            schemaGroup.removeClass('hidden'); // Show schema dropdown
+                        },
+                        error: function() {
+                            showMessage('Error fetching schemas.', 'error');
+                            schemaGroup.addClass('hidden'); // Hide schema dropdown
+                        }
+                    });
+                } else {
+                    schemaGroup.addClass('hidden'); // Hide schema dropdown
+                }
+            });
+
+            // Fetch table names when a schema is selected
+            $('#schemaName').on('change', function() {
+                const dbName = $('#dbName').val();
+                const schemaName = $(this).val();
                 const tableGroup = $('#tableGroup');
                 const tableSelect = $('#tableName');
                 tableSelect.empty().append('<option value="">Select a table</option>');
 
-                if (dbName) {
+                if (dbName && schemaName) {
                     $.ajax({
-                        url: `/tables/${dbName}`,
+                        url: `/tables/${dbName}/${schemaName}`,
                         type: 'GET',
                         success: function(response) {
                             response.tables.forEach(function(table) {
@@ -200,10 +237,11 @@
                 // Get form data
                 const email = $('#email').val();
                 const dbName = $('#dbName').val();
+                const schemaName = $('#schemaName').val();
                 const tableName = $('#tableName').val();
 
                 // Reset previous validation styles
-                $('#email, #dbName, #tableName').removeClass('invalid');
+                $('#email, #dbName, #schemaName, #tableName').removeClass('invalid');
                 let errors = [];
 
                 // Validate email
@@ -219,6 +257,12 @@
                     errors.push('Please select a valid database.');
                 }
 
+                // Validate schema name (only if schema dropdown is visible)
+                if ($('#schemaGroup').is(':visible') && !schemaName) {
+                    $('#schemaName').addClass('invalid');
+                    errors.push('Please select a valid schema.');
+                }
+
                 // Validate table name (only if table dropdown is visible)
                 if ($('#tableGroup').is(':visible') && !tableName) {
                     $('#tableName').addClass('invalid');
@@ -232,7 +276,7 @@
                 }
 
                 // Submit form data to Flask
-                const formData = { email, dbName, tableName };
+                const formData = { email, dbName, schemaName, tableName };
                 $.ajax({
                     url: '/submit',
                     type: 'POST',
@@ -242,6 +286,7 @@
                         showMessage('Your request has been submitted to the backend. You will receive the data through email.', 'success');
                         $('#userForm')[0].reset();
                         $('#dbName').val('').trigger('change'); // Reset Select2
+                        $('#schemaGroup').addClass('hidden'); // Hide schema dropdown
                         $('#tableGroup').addClass('hidden'); // Hide table dropdown
                     },
                     error: function(xhr, status, error) {
