@@ -308,3 +308,125 @@
     </script>
 </body>
 </html>
+
+
+
+------------
+from flask import Flask, jsonify, request
+import pymssql
+import os
+
+app = Flask(__name__)
+
+# SQL Server connection configuration
+SQL_SERVER = 'your_server'  # e.g., 'localhost' or 'server_name\\instance'
+SQL_USER = 'your_username'  # e.g., 'sa'
+SQL_PASSWORD = 'your_password'
+METADATA_DB = 'MetadataDB'  # Database containing TableMetadata
+METADATA_TABLE = 'TableMetadata'  # Table with db_name, schema_name, table_name, owner_name
+
+def get_db_connection(database=METADATA_DB):
+    try:
+        conn = pymssql.connect(
+            server=SQL_SERVER,
+            user=SQL_USER,
+            password=SQL_PASSWORD,
+            database=database,
+            as_dict=True
+        )
+        return conn
+    except pymssql.OperationalError as e:
+        print(f"Connection error: {e}")
+        return None
+
+@app.route('/')
+def index():
+    return app.send_static_file('index.html')
+
+@app.route('/databases', methods=['GET'])
+def get_databases():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT DISTINCT db_name FROM {METADATA_TABLE} ORDER BY db_name")
+        databases = [row['db_name'] for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return jsonify({'databases': databases})
+    except Exception as e:
+        print(f"Error fetching databases: {e}")
+        return jsonify({'error': 'Error fetching databases'}), 500
+
+@app.route('/schemas/<db_name>', methods=['GET'])
+def get_schemas(db_name):
+    # Validate db_name to prevent SQL injection
+    if not db_name.isalnum():
+        return jsonify({'error': 'Invalid database name'}), 400
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT DISTINCT schema_name FROM {METADATA_TABLE} WHERE db_name = %s ORDER BY schema_name",
+            (db_name,)
+        )
+        schemas = [row['schema_name'] for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return jsonify({'schemas': schemas})
+    except Exception as e:
+        print(f"Error fetching schemas: {e}")
+        return jsonify({'error': 'Error fetching schemas'}), 500
+
+@app.route('/tables/<db_name>/<schema_name>', methods=['GET'])
+def get_tables(db_name, schema_name):
+    # Validate inputs to prevent SQL injection
+    if not (db_name.isalnum() and schema_name.isalnum()):
+        return jsonify({'error': 'Invalid database or schema name'}), 400
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT table_name FROM {METADATA_TABLE} WHERE db_name = %s AND schema_name = %s ORDER BY table_name",
+            (db_name, schema_name)
+        )
+        tables = [row['table_name'] for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return jsonify({'tables': tables})
+    except Exception as e:
+        print(f"Error fetching tables: {e}")
+        return jsonify({'error': 'Error fetching tables'}), 500
+
+@app.route('/submit', methods=['POST'])
+def submit_form():
+    data = request.get_json()
+    email = data.get('email')
+    db_name = data.get('dbName')
+    schema_name = data.get('schemaName')
+    table_name = data.get('tableName')
+
+    # Basic validation
+    if not all([email, db_name, schema_name, table_name]):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    # Placeholder for backend processing (e.g., sending email or processing data)
+    print(f"Received: Email={email}, DB={db_name}, Schema={schema_name}, Table={table_name}")
+    
+    # TODO: Implement actual backend logic (e.g., query table, send email)
+    return jsonify({'message': 'Form submitted successfully'})
+
+if __name__ == '__main__':
+    # Ensure static folder exists for serving index.html
+    os.makedirs('static', exist_ok=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
