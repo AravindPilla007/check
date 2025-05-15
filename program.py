@@ -1,17 +1,22 @@
 from flask import Flask, request, render_template_string, send_file
-import requests
+import google.generativeai as genai
 import os
 import sqlite3
 from datetime import datetime
 import time
 from pyngrok import ngrok
 import subprocess
+import requests
+from requests.exceptions import HTTPError
 
 app = Flask(__name__)
 
-# Mistral AI API key (replace with your actual API key or use environment variable)
-MISTRAL_API_KEY = "your_mistral_api_key_here"  # Set this in Colab or use os.environ
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+# Gemini API key (replace with your actual API key or use environment variable)
+GEMINI_API_KEY = "your_gemini_api_key_here"  # Set this in Colab or use os.environ
+MODEL_NAME = "gemini-1.5-flash"  # Use Gemini 1.5 Flash for generous free tier
+
+# Configure Gemini API
+genai.configure(api_key=GEMINI_API_KEY)
 
 # SQLite database file
 DB_FILE = "metadata.db"
@@ -21,6 +26,9 @@ current_sas_file = None
 
 # Store table name globally
 table_name = None
+
+# Cache for table explanations
+explanation_cache = {}
 
 def init_db():
     """Initialize SQLite database and populate with 20 tables' metadata."""
@@ -207,7 +215,7 @@ HTML_TEMPLATE = """
         button { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background-color: #218838; }
         pre { background: #f8f8f8; padding: 15px; border-radius: 4px; overflow-x: auto; }
-        .error { color: reda; }
+        .error { color: red; }
         .success { color: green; }
         .metadata { font-size: 0.9em; color: #555; }
         .explanation { font-size: 1em; color: #333; margin-top: 20px; }
@@ -295,30 +303,37 @@ def get_table_metadata(table_name):
     conn.close()
     return metadata
 
-def call_mistral_api(prompt):
-    """Call Mistral AI API with the given prompt."""
-    headers = {
-        "Authorization": f"Bearer {MISTRAL_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "mistral-large-latest",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1000,
-        "temperature": 0.3
-    }
-    try:
-        response = requests.post(MISTRAL_API_URL, json=payload, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-        output = result["choices"][0]["message"]["content"].strip()
-        return output
-    except Exception as e:
-        print(f"Error calling Mistral API: {e}")
-        return "Error processing request"
+def call_gemini_api(prompt, max_attempts=3, initial_delay=1):
+    """Call Gemini API with exponential backoff for 429 errors."""
+    model = genai.GenerativeModel(MODEL_NAME)
+    
+    for attempt in range(max_attempts):
+        try:
+            response = model.generate_content(prompt)
+            output = response.text.strip()
+            print(f"API call successful: {output[:50]}...")
+            return output
+        except HTTPError as e:
+            if e.response.status_code == 429:
+                retry_after = initial_delay * (2 ** attempt)
+                print(f"429 Too Many Requests. Retrying after {retry_after} seconds...")
+                time.sleep(retry_after)
+                continue
+            print(f"Error calling Gemini API (attempt {attempt + 1}): {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(initial_delay * (2 ** attempt))
+        except Exception as e:
+            print(f"Error calling Gemini API (attempt {attempt + 1}): {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(initial_delay * (2 ** attempt))
+    return "Error processing request: Too many attempts or rate limit exceeded."
 
 def explain_table(table_name):
-    """Generate an explanation of the table using Mistral AI."""
+    """Generate an explanation of the table using Gemini API, with caching."""
+    if table_name in explanation_cache:
+        print(f"Using cached explanation for {table_name}")
+        return explanation_cache[table_name]
+    
     metadata = get_table_metadata(table_name)
     columns_info = "\n".join([f"- {col['column_name']}: {col['type']} ({col['description']})" for col in metadata])
     prompt = f"""
@@ -328,10 +343,13 @@ def explain_table(table_name):
     Columns:
     {columns_info}
     """
-    return call_mistral_api(prompt)
+    explanation = call_gemini_api(prompt)
+    if explanation != "Error processing request: Too many attempts or rate limit exceeded.":
+        explanation_cache[table_name] = explanation
+    return explanation
 
 def generate_sas_query(query, table_name):
-    """Convert natural language query to SAS PROC SQL using Mistral AI."""
+    """Convert natural language query to SAS PROC SQL using Gemini API."""
     metadata = get_table_metadata(table_name)
     columns_info = "\n".join([f"- {col['column_name']}: {col['type']} ({col['description']})" for col in metadata])
     prompt = f"""
@@ -349,7 +367,7 @@ def generate_sas_query(query, table_name):
 
     Query: {query}
     """
-    return call_mistral_api(prompt)
+    return call_gemini_api(prompt)
 
 def save_sas_file(sas_code):
     """Save SAS code to a file and return the filename."""
@@ -415,13 +433,13 @@ def explain_table_route():
         )
     
     explanation = explain_table(table_name)
-    if explanation == "Error processing request":
+    if explanation == "Error processing request: Too many attempts or rate limit exceeded.":
         return render_template_string(
             HTML_TEMPLATE,
             table_name=table_name,
             tables=tables,
             metadata=get_table_metadata(table_name),
-            error="Failed to generate table explanation."
+            error="Failed to generate table explanation: API rate limit exceeded. Please wait and try again."
         )
     
     return render_template_string(
@@ -462,6 +480,14 @@ def generate_query():
             tables=tables,
             metadata=get_table_metadata(table_name),
             error="Query cannot be converted to SAS PROC SQL."
+        )
+    if sas_code == "Error processing request: Too many attempts or rate limit exceeded.":
+        return render_template_string(
+            HTML_TEMPLATE,
+            table_name=table_name,
+            tables=tables,
+            metadata=get_table_metadata(table_name),
+            error="Failed to generate SAS query: API rate limit exceeded. Please wait and try again."
         )
     
     # Save the SAS code to a file
@@ -508,5 +534,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error starting ngrok: {e}")
         exit(1)
+    
+    # Network diagnostics
+    print("Running network diagnostics...")
+    subprocess.run(["nslookup", "generativelanguage.googleapis.com"])
+    subprocess.run(["ping", "-c", "4", "generativelanguage.googleapis.com"])
     
     app.run(port=5000)
