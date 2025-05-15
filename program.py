@@ -6,10 +6,14 @@ from datetime import datetime
 import time
 from pyngrok import ngrok
 import subprocess
-import requests
 from requests.exceptions import HTTPError
+import logging
 
 app = Flask(__name__)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Gemini API key (replace with your actual API key or use environment variable)
 GEMINI_API_KEY = "your_gemini_api_key_here"  # Set this in Colab or use os.environ
@@ -253,7 +257,7 @@ HTML_TEMPLATE = """
             <h3 class="text-xl font-semibold text-gray-800 mb-2">Suggested Questions</h3>
             <ul class="space-y-2">
                 {% for suggestion in suggestions %}
-                <li class="suggestion p-2 rounded-md bg-gray-100" onclick="fillQuery('{{ suggestion|escapejs }}')">{{ suggestion }}</li>
+                <li class="suggestion p-2 rounded-md bg-gray-100" onclick="fillQuery({{ suggestion|tojson }})">{{ suggestion }}</li>
                 {% endfor %}
             </ul>
         </div>
@@ -289,7 +293,7 @@ HTML_TEMPLATE = """
             const rows = document.querySelectorAll('#column-table .column-row');
             rows.forEach((row, index) => {
                 const columnName = row.cells[0].textContent.toLowerCase();
-                row.classList.toggle('visible', columnName.includes(input) || index < 5);
+                row.classList.toggle('visible', columnName.includes(input) || (input === '' && index < 5));
             });
         }
 
@@ -297,12 +301,12 @@ HTML_TEMPLATE = """
             document.getElementById('query').value = query;
         }
 
-        // Show first 5 columns by default
         document.addEventListener('DOMContentLoaded', () => {
             const rows = document.querySelectorAll('#column-table .column-row');
             rows.forEach((row, index) => {
                 if (index < 5) row.classList.add('visible');
             });
+            document.getElementById('column-search').addEventListener('input', searchColumns);
         });
     </script>
 </body>
@@ -339,19 +343,19 @@ def call_gemini_api(prompt, max_attempts=3, initial_delay=1):
         try:
             response = model.generate_content(prompt)
             output = response.text.strip()
-            print(f"API call successful: {output[:50]}...")
+            logger.info(f"API call successful: {output[:50]}...")
             return output
         except HTTPError as e:
             if e.response.status_code == 429:
                 retry_after = initial_delay * (2 ** attempt)
-                print(f"429 Too Many Requests. Retrying after {retry_after} seconds...")
+                logger.warning(f"429 Too Many Requests. Retrying after {retry_after} seconds...")
                 time.sleep(retry_after)
                 continue
-            print(f"Error calling Gemini API (attempt {attempt + 1}): {e}")
+            logger.error(f"Error calling Gemini API (attempt {attempt + 1}): {e}")
             if attempt < max_attempts - 1:
                 time.sleep(initial_delay * (2 ** attempt))
         except Exception as e:
-            print(f"Error calling Gemini API (attempt {attempt + 1}): {e}")
+            logger.error(f"Error calling Gemini API (attempt {attempt + 1}): {e}")
             if attempt < max_attempts - 1:
                 time.sleep(initial_delay * (2 ** attempt))
     return "Error processing request: Too many attempts or rate limit exceeded."
@@ -359,7 +363,7 @@ def call_gemini_api(prompt, max_attempts=3, initial_delay=1):
 def explain_table(table_name):
     """Generate an explanation of the table using Gemini API, with caching."""
     if table_name in explanation_cache:
-        print(f"Using cached explanation for {table_name}")
+        logger.info(f"Using cached explanation for {table_name}")
         return explanation_cache[table_name]
     
     metadata = get_table_metadata(table_name)
@@ -400,7 +404,7 @@ def generate_sas_query(query, table_name):
 def generate_suggestions(table_name):
     """Generate 5 relevant suggested questions for the table using Gemini API."""
     if table_name in suggestions_cache:
-        print(f"Using cached suggestions for {table_name}")
+        logger.info(f"Using cached suggestions for {table_name}")
         return suggestions_cache[table_name]
     
     metadata = get_table_metadata(table_name)
@@ -443,7 +447,7 @@ def start_ngrok_with_retry(max_attempts=3, delay=5):
             public_url = ngrok.connect(5000).public_url
             return public_url
         except Exception as e:
-            print(f"Ngrok attempt {attempt + 1} failed: {e}")
+            logger.error(f"Ngrok attempt {attempt + 1} failed: {e}")
             if attempt < max_attempts - 1:
                 time.sleep(delay)
     raise Exception("Failed to start ngrok after multiple attempts. Please check your ngrok token and internet connection.")
@@ -452,7 +456,11 @@ def start_ngrok_with_retry(max_attempts=3, delay=5):
 def index():
     global table_name
     tables = get_tables()
-    return render_template_string(HTML_TEMPLATE, table_name=table_name, tables=tables)
+    try:
+        return render_template_string(HTML_TEMPLATE, table_name=table_name, tables=tables)
+    except Exception as e:
+        logger.error(f"Template rendering error: {e}")
+        return f"Error rendering template: {str(e)}", 500
 
 @app.route("/set_table", methods=["POST"])
 def set_table():
@@ -469,14 +477,18 @@ def set_table():
     table_name = table_name_input
     metadata = get_table_metadata(table_name)
     suggestions = generate_suggestions(table_name)
-    return render_template_string(
-        HTML_TEMPLATE,
-        table_name=table_name,
-        tables=tables,
-        metadata=metadata,
-        suggestions=suggestions,
-        success=f"Table '{table_name}' selected."
-    )
+    try:
+        return render_template_string(
+            HTML_TEMPLATE,
+            table_name=table_name,
+            tables=tables,
+            metadata=metadata,
+            suggestions=suggestions,
+            success=f"Table '{table_name}' selected."
+        )
+    except Exception as e:
+        logger.error(f"Template rendering error: {e}")
+        return f"Error rendering template: {str(e)}", 500
 
 @app.route("/generate_response", methods=["POST"])
 def generate_response():
@@ -501,7 +513,6 @@ def generate_response():
             error="Query cannot be empty."
         )
     
-    # Check if the query is asking for table explanation
     query_lower = query.lower()
     is_explanation = "explain table" in query_lower or "describe table" in query_lower or "what is this table" in query_lower
     
@@ -516,14 +527,18 @@ def generate_response():
                 suggestions=generate_suggestions(table_name),
                 error="Failed to generate table explanation: API rate limit exceeded. Please wait and try again."
             )
-        return render_template_string(
-            HTML_TEMPLATE,
-            table_name=table_name,
-            tables=tables,
-            metadata=get_table_metadata(table_name),
-            suggestions=generate_suggestions(table_name),
-            explanation=explanation
-        )
+        try:
+            return render_template_string(
+                HTML_TEMPLATE,
+                table_name=table_name,
+                tables=tables,
+                metadata=get_table_metadata(table_name),
+                suggestions=generate_suggestions(table_name),
+                explanation=explanation
+            )
+        except Exception as e:
+            logger.error(f"Template rendering error: {e}")
+            return f"Error rendering template: {str(e)}", 500
     else:
         sas_code = generate_sas_query(query, table_name)
         if sas_code == "Query cannot be converted to SAS PROC SQL":
@@ -545,19 +560,22 @@ def generate_response():
                 error="Failed to generate SAS query: API rate limit exceeded. Please wait and try again."
             )
         
-        # Save the SAS code to a file
         filename = save_sas_file(sas_code)
         global current_sas_file
         current_sas_file = filename
         
-        return render_template_string(
-            HTML_TEMPLATE,
-            table_name=table_name,
-            tables=tables,
-            metadata=get_table_metadata(table_name),
-            suggestions=generate_suggestions(table_name),
-            sas_code=sas_code
-        )
+        try:
+            return render_template_string(
+                HTML_TEMPLATE,
+                table_name=table_name,
+                tables=tables,
+                metadata=get_table_metadata(table_name),
+                suggestions=generate_suggestions(table_name),
+                sas_code=sas_code
+            )
+        except Exception as e:
+            logger.error(f"Template rendering error: {e}")
+            return f"Error rendering template: {str(e)}", 500
 
 @app.route("/download", methods=["GET"])
 def download():
@@ -580,17 +598,17 @@ if __name__ == "__main__":
         subprocess.run(["tar", "-xvzf", "ngrok-v3-stable-linux-amd64.tgz"], check=True)
         subprocess.run(["mv", "ngrok", "/usr/local/bin/"], check=True)
     except Exception as e:
-        print(f"Failed to update ngrok client: {e}")
+        logger.error(f"Failed to update ngrok client: {e}")
     
     try:
         ngrok.set_auth_token("your_ngrok_authtoken_here")
         public_url = start_ngrok_with_retry()
-        print(f"Flask app running at: {public_url}")
+        logger.info(f"Flask app running at: {public_url}")
     except Exception as e:
-        print(f"Error starting ngrok: {e}")
+        logger.error(f"Error starting ngrok: {e}")
         exit(1)
     
-    print("Running network diagnostics...")
+    logger.info("Running network diagnostics...")
     subprocess.run(["nslookup", "generativelanguage.googleapis.com"])
     subprocess.run(["ping", "-c", "4", "generativelanguage.googleapis.com"])
     
