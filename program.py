@@ -36,7 +36,7 @@ explanation_cache = {}
 suggestions_cache = {}
 
 def init_db():
-    """Initialize SQLite database and populate with 20 tables' metadata."""
+    """Initialize SQLite database and populate with 20 tables, each with 10 columns."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
@@ -62,7 +62,12 @@ def init_db():
             ("product_name", "character", "Name of the product"),
             ("sale_date", "date", "Date of sale"),
             ("amount", "numeric", "Sale amount in USD"),
-            ("region", "character", "Sales region")
+            ("region", "character", "Sales region"),
+            ("customer_id", "numeric", "Unique customer ID"),
+            ("store_id", "numeric", "Unique store ID"),
+            ("category", "character", "Product category"),
+            ("quantity", "numeric", "Quantity sold"),
+            ("discount", "numeric", "Discount applied in USD")
         ]),
         ("employee_records", [
             ("emp_id", "numeric", "Employee ID"),
@@ -70,115 +75,227 @@ def init_db():
             ("last_name", "character", "Employee last name"),
             ("salary", "numeric", "Annual salary in USD"),
             ("hire_date", "date", "Date of hire"),
-            ("department", "character", "Department name")
+            ("department", "character", "Department name"),
+            ("email", "character", "Employee email"),
+            ("phone", "character", "Employee phone number"),
+            ("job_title", "character", "Job title"),
+            ("manager_id", "numeric", "Manager’s employee ID")
         ]),
         ("customer_info", [
             ("customer_id", "numeric", "Unique customer ID"),
             ("email", "character", "Customer email address"),
             ("age", "numeric", "Customer age"),
-            ("join_date", "date", "Date customer joined")
+            ("join_date", "date", "Date customer joined"),
+            ("first_name", "character", "Customer first name"),
+            ("last_name", "character", "Customer last name"),
+            ("phone", "character", "Customer phone number"),
+            ("address", "character", "Customer address"),
+            ("loyalty_points", "numeric", "Loyalty program points"),
+            ("status", "character", "Customer status (active/inactive)")
         ]),
         ("inventory_stock", [
             ("item_id", "numeric", "Unique item ID"),
             ("item_name", "character", "Name of the item"),
             ("quantity", "numeric", "Stock quantity"),
-            ("warehouse", "character", "Warehouse location")
+            ("warehouse", "character", "Warehouse location"),
+            ("last_updated", "date", "Date of last stock update"),
+            ("unit_price", "numeric", "Price per unit"),
+            ("category", "character", "Item category"),
+            ("supplier_id", "numeric", "Supplier ID"),
+            ("reorder_level", "numeric", "Minimum stock level"),
+            ("status", "character", "Stock status (available/low)")
         ]),
         ("order_details", [
             ("order_id", "numeric", "Unique order ID"),
             ("customer_id", "numeric", "Customer ID"),
             ("order_date", "date", "Date of order"),
-            ("total_amount", "numeric", "Total order amount")
+            ("total_amount", "numeric", "Total order amount"),
+            ("status", "character", "Order status"),
+            ("shipping_address", "character", "Shipping address"),
+            ("payment_method", "character", "Payment method"),
+            ("item_count", "numeric", "Number of items"),
+            ("discount", "numeric", "Discount applied"),
+            ("delivery_date", "date", "Expected delivery date")
         ]),
         ("product_catalog", [
             ("product_id", "numeric", "Unique product ID"),
             ("category", "character", "Product category"),
             ("price", "numeric", "Product price"),
-            ("stock_level", "numeric", "Current stock level")
+            ("stock_level", "numeric", "Current stock level"),
+            ("product_name", "character", "Name of the product"),
+            ("description", "character", "Product description"),
+            ("brand", "character", "Product brand"),
+            ("launch_date", "date", "Product launch date"),
+            ("weight", "numeric", "Product weight in kg"),
+            ("rating", "numeric", "Average customer rating")
         ]),
         ("store_locations", [
             ("store_id", "numeric", "Unique store ID"),
             ("city", "character", "City of store"),
             ("state", "character", "State of store"),
-            ("open_date", "date", "Store opening date")
+            ("open_date", "date", "Store opening date"),
+            ("address", "character", "Store address"),
+            ("manager_id", "numeric", "Store manager ID"),
+            ("phone", "character", "Store contact number"),
+            ("size", "numeric", "Store size in sq ft"),
+            ("region", "character", "Sales region"),
+            ("status", "character", "Store status (open/closed)")
         ]),
         ("supplier_info", [
             ("supplier_id", "numeric", "Unique supplier ID"),
             ("supplier_name", "character", "Name of supplier"),
             ("contact_email", "character", "Supplier email"),
-            ("rating", "numeric", "Supplier rating (1-5)")
+            ("rating", "numeric", "Supplier rating (1-5)"),
+            ("phone", "character", "Supplier phone number"),
+            ("address", "character", "Supplier address"),
+            ("contract_date", "date", "Contract start date"),
+            ("product_category", "character", "Supplied product category"),
+            ("delivery_time", "numeric", "Average delivery time in days"),
+            ("status", "character", "Supplier status (active/inactive)")
         ]),
         ("transaction_log", [
             ("transaction_id", "numeric", "Unique transaction ID"),
             ("sale_id", "numeric", "Related sale ID"),
             ("transaction_date", "date", "Date of transaction"),
-            ("amount", "numeric", "Transaction amount")
+            ("amount", "numeric", "Transaction amount"),
+            ("payment_method", "character", "Payment method"),
+            ("customer_id", "numeric", "Customer ID"),
+            ("store_id", "numeric", "Store ID"),
+            ("status", "character", "Transaction status"),
+            ("currency", "character", "Transaction currency"),
+            ("notes", "character", "Additional notes")
         ]),
         ("marketing_campaigns", [
             ("campaign_id", "numeric", "Unique campaign ID"),
             ("campaign_name", "character", "Name of campaign"),
             ("start_date", "date", "Campaign start date"),
-            ("budget", "numeric", "Campaign budget")
+            ("budget", "numeric", "Campaign budget"),
+            ("end_date", "date", "Campaign end date"),
+            ("target_audience", "character", "Target audience"),
+            ("channel", "character", "Marketing channel"),
+            ("roi", "numeric", "Return on investment"),
+            ("status", "character", "Campaign status"),
+            ("manager_id", "numeric", "Campaign manager ID")
         ]),
         ("website_traffic", [
             ("visit_id", "numeric", "Unique visit ID"),
             ("user_id", "numeric", "User ID"),
             ("visit_date", "date", "Date of visit"),
-            ("page_views", "numeric", "Number of page views")
+            ("page_views", "numeric", "Number of page views"),
+            ("session_duration", "numeric", "Session duration in seconds"),
+            ("source", "character", "Traffic source"),
+            ("device", "character", "Device type"),
+            ("browser", "character", "Browser used"),
+            ("location", "character", "Visitor location"),
+            ("conversion", "character", "Conversion status (yes/no)")
         ]),
         ("payment_records", [
             ("payment_id", "numeric", "Unique payment ID"),
             ("order_id", "numeric", "Related order ID"),
             ("payment_date", "date", "Date of payment"),
-            ("amount", "numeric", "Payment amount")
+            ("amount", "numeric", "Payment amount"),
+            ("payment_method", "character", "Payment method"),
+            ("status", "character", "Payment status"),
+            ("customer_id", "numeric", "Customer ID"),
+            ("currency", "character", "Payment currency"),
+            ("transaction_id", "numeric", "Transaction ID"),
+            ("notes", "character", "Additional notes")
         ]),
         ("hr_attendance", [
             ("attendance_id", "numeric", "Unique attendance ID"),
             ("emp_id", "numeric", "Employee ID"),
             ("date", "date", "Attendance date"),
-            ("hours_worked", "numeric", "Hours worked")
+            ("hours_worked", "numeric", "Hours worked"),
+            ("status", "character", "Attendance status"),
+            ("shift", "character", "Shift type"),
+            ("location", "character", "Work location"),
+            ("overtime_hours", "numeric", "Overtime hours"),
+            ("leave_type", "character", "Leave type if absent"),
+            ("notes", "character", "Additional notes")
         ]),
         ("logistics_routes", [
             ("route_id", "numeric", "Unique route ID"),
             ("start_location", "character", "Starting location"),
             ("end_location", "character", "Ending location"),
-            ("distance", "numeric", "Distance in miles")
+            ("distance", "numeric", "Distance in miles"),
+            ("travel_time", "numeric", "Travel time in hours"),
+            ("vehicle_id", "numeric", "Vehicle ID"),
+            ("driver_id", "numeric", "Driver ID"),
+            ("status", "character", "Route status"),
+            ("last_updated", "date", "Last update date"),
+            ("cost", "numeric", "Route cost in USD")
         ]),
         ("event_log", [
             ("event_id", "numeric", "Unique event ID"),
             ("event_type", "character", "Type of event"),
             ("event_date", "date", "Date of event"),
-            ("user_id", "numeric", "User ID")
+            ("user_id", "numeric", "User ID"),
+            ("description", "character", "Event description"),
+            ("status", "character", "Event status"),
+            ("location", "character", "Event location"),
+            ("duration", "numeric", "Event duration in minutes"),
+            ("priority", "character", "Event priority"),
+            ("notes", "character", "Additional notes")
         ]),
         ("feedback_survey", [
             ("survey_id", "numeric", "Unique survey ID"),
             ("customer_id", "numeric", "Customer ID"),
             ("score", "numeric", "Feedback score (1-10)"),
-            ("comments", "character", "Customer comments")
+            ("comments", "character", "Customer comments"),
+            ("survey_date", "date", "Date of survey"),
+            ("product_id", "numeric", "Related product ID"),
+            ("category", "character", "Survey category"),
+            ("status", "character", "Survey status"),
+            ("response_time", "numeric", "Response time in hours"),
+            ("follow_up", "character", "Follow-up required (yes/no)")
         ]),
         ("asset_inventory", [
             ("asset_id", "numeric", "Unique asset ID"),
             ("asset_name", "character", "Name of asset"),
             ("purchase_date", "date", "Date of purchase"),
-            ("value", "numeric", "Asset value")
+            ("value", "numeric", "Asset value"),
+            ("location", "character", "Asset location"),
+            ("status", "character", "Asset status"),
+            ("category", "character", "Asset category"),
+            ("last_maintenance", "date", "Last maintenance date"),
+            ("depreciation", "numeric", "Depreciation amount"),
+            ("owner_id", "numeric", "Owner employee ID")
         ]),
         ("training_records", [
             ("training_id", "numeric", "Unique training ID"),
             ("emp_id", "numeric", "Employee ID"),
             ("training_date", "date", "Date of training"),
-            ("course_name", "character", "Name of course")
+            ("course_name", "character", "Name of course"),
+            ("duration", "numeric", "Duration in hours"),
+            ("trainer_id", "numeric", "Trainer ID"),
+            ("status", "character", "Training status"),
+            ("cost", "numeric", "Training cost"),
+            ("location", "character", "Training location"),
+            ("certificate", "character", "Certificate issued (yes/no)")
         ]),
         ("budget_allocation", [
             ("budget_id", "numeric", "Unique budget ID"),
             ("department", "character", "Department name"),
             ("amount", "numeric", "Budget amount"),
-            ("fiscal_year", "numeric", "Fiscal year")
+            ("fiscal_year", "numeric", "Fiscal year"),
+            ("start_date", "date", "Budget start date"),
+            ("end_date", "date", "Budget end date"),
+            ("manager_id", "numeric", "Manager ID"),
+            ("status", "character", "Budget status"),
+            ("category", "character", "Budget category"),
+            ("spent_amount", "numeric", "Amount spent")
         ]),
         ("support_tickets", [
             ("ticket_id", "numeric", "Unique ticket ID"),
             ("customer_id", "numeric", "Customer ID"),
             ("issue_date", "date", "Date ticket was raised"),
-            ("status", "character", "Ticket status")
+            ("status", "character", "Ticket status"),
+            ("description", "character", "Issue description"),
+            ("priority", "character", "Ticket priority"),
+            ("assigned_to", "numeric", "Assigned employee ID"),
+            ("resolution_date", "date", "Date resolved"),
+            ("category", "character", "Issue category"),
+            ("satisfaction_score", "numeric", "Customer satisfaction score")
         ])
     ]
 
@@ -227,7 +344,12 @@ HTML_TEMPLATE = """
             </form>
         </div>
         {% else %}
-        <p class="text-lg font-semibold text-gray-800 mb-4"><strong>Selected Table:</strong> {{ table_name }}</p>
+        <div class="flex justify-between items-center mb-4">
+            <p class="text-lg font-semibold text-gray-800"><strong>Selected Table:</strong> {{ table_name }}</p>
+            <form method="POST" action="/reset" class="inline">
+                <button type="submit" class="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600">Reset</button>
+            </form>
+        </div>
         <div class="mb-6">
             <h3 class="text-xl font-semibold text-gray-800 mb-2">Table Metadata</h3>
             <div class="flex items-center mb-4">
@@ -485,6 +607,23 @@ def set_table():
             metadata=metadata,
             suggestions=suggestions,
             success=f"Table '{table_name}' selected."
+        )
+    except Exception as e:
+        logger.error(f"Template rendering error: {e}")
+        return f"Error rendering template: {str(e)}", 500
+
+@app.route("/reset", methods=["POST"])
+def reset():
+    global table_name, current_sas_file
+    table_name = None
+    current_sas_file = None
+    tables = get_tables()
+    try:
+        return render_template_string(
+            HTML_TEMPLATE,
+            table_name=table_name,
+            tables=tables,
+            success="Form reset. Please select a table."
         )
     except Exception as e:
         logger.error(f"Template rendering error: {e}")
