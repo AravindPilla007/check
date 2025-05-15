@@ -3,13 +3,15 @@ import requests
 import os
 import sqlite3
 from datetime import datetime
-import–
+import time
+from pyngrok import ngrok
+import subprocess
 
 app = Flask(__name__)
 
 # Mistral AI API key (replace with your actual API key or use environment variable)
 MISTRAL_API_KEY = "your_mistral_api_key_here"  # Set this in Colab or use os.environ
-MISTRAL_API_URL = "https://api.mixtral.ai/v1/chat/completions"
+MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 # SQLite database file
 DB_FILE = "metadata.db"
@@ -205,7 +207,7 @@ HTML_TEMPLATE = """
         button { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background-color: #218838; }
         pre { background: #f8f8f8; padding: 15px; border-radius: 4px; overflow-x: auto; }
-        .error { color: red; }
+        .error { color: reda; }
         .success { color: green; }
         .metadata { font-size: 0.9em; color: #555; }
         .explanation { font-size: 1em; color: #333; margin-top: 20px; }
@@ -262,7 +264,7 @@ HTML_TEMPLATE = """
         {% if error %}
         <p class="error">{{ error }}</p>
         {% endif %}
-        {% else %}
+        {% endif %}
         {% if success %}
         <p class="success">{{ success }}</p>
         {% endif %}
@@ -356,6 +358,21 @@ def save_sas_file(sas_code):
     with open(filename, "w") as f:
         f.write(sas_code)
     return filename
+
+def start_ngrok_with_retry(max_attempts=3, delay=5):
+    """Start ngrok with retry mechanism to handle ERR_NGROK_3200."""
+    for attempt in range(max_attempts):
+        try:
+            # Kill any existing ngrok processes
+            subprocess.run(["pkill", "ngrok"], check=False)
+            # Start new ngrok tunnel
+            public_url = ngrok.connect(5000).public_url
+            return public_url
+        except Exception as e:
+            print(f"Ngrok attempt {attempt + 1} failed: {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(delay)
+    raise Exception("Failed to start ngrok after multiple attempts. Please check your ngrok token and internet connection.")
 
 @app.route("/", methods=["GET"])
 def index():
@@ -475,9 +492,21 @@ def download():
     return send_file(current_sas_file, as_attachment=True)
 
 if __name__ == "__main__":
-    from pyngrok import ngrok
-    ngrok.set_auth_token("your_ngrok_authtoken_here")
-    public_url = ngrok.connect(5000).public_url
-    print(f"Flask app running at: {public_url}")
+    # Update ngrok client
+    try:
+        subprocess.run(["wget", "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"], check=True)
+        subprocess.run(["tar", "-xvzf", "ngrok-v3-stable-linux-amd64.tgz"], check=True)
+        subprocess.run(["mv", "ngrok", "/usr/local/bin/"], check=True)
+    except Exception as e:
+        print(f"Failed to update ngrok client: {e}")
+    
+    # Start ngrok with retry
+    try:
+        ngrok.set_auth_token("your_ngrok_authtoken_here")
+        public_url = start_ngrok_with_retry()
+        print(f"Flask app running at: {public_url}")
+    except Exception as e:
+        print(f"Error starting ngrok: {e}")
+        exit(1)
+    
     app.run(port=5000)
-    PXK7l7X7INXRfgihvJVjZJ8ZSsgDrDUk
