@@ -3,13 +3,13 @@ import requests
 import os
 import sqlite3
 from datetime import datetime
-import re
+import–
 
 app = Flask(__name__)
 
-# xAI API key (replace with your actual API key or use environment variable)
-XAI_API_KEY = "your_xai_api_key_here"  # Set this in Colab or use os.environ
-XAI_API_URL = "https://api.x.ai/v1/chat/completions"
+# Mistral AI API key (replace with your actual API key or use environment variable)
+MISTRAL_API_KEY = "your_mistral_api_key_here"  # Set this in Colab or use os.environ
+MISTRAL_API_URL = "https://api.mixtral.ai/v1/chat/completions"
 
 # SQLite database file
 DB_FILE = "metadata.db"
@@ -202,12 +202,13 @@ HTML_TEMPLATE = """
         label { font-weight: bold; display: block; margin-bottom: 5px; }
         select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
         textarea { height: 100px; resize: vertical; }
-        button { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background-color: #218838; }
         pre { background: #f8f8f8; padding: 15px; border-radius: 4px; overflow-x: auto; }
         .error { color: red; }
         .success { color: green; }
         .metadata { font-size: 0.9em; color: #555; }
+        .explanation { font-size: 1em; color: #333; margin-top: 20px; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
@@ -240,12 +241,19 @@ HTML_TEMPLATE = """
             </table>
         </div>
         <div class="form-group">
-            <form method="POST" action="/generate_query">
+            <form method="POST" action="/explain_table" style="display: inline;">
+                <button type="submit">Explain Table</button>
+            </form>
+            <form method="POST" action="/generate_query" style="display: inline;">
                 <label for="query">Enter your query in simple English:</label>
                 <textarea id="query" name="query" required></textarea>
                 <button type="submit">Generate SAS Query</button>
             </form>
         </div>
+        {% if explanation %}
+        <h2>Table Explanation</h2>
+        <div class="explanation">{{ explanation }}</div>
+        {% endif %}
         {% if sas_code %}
         <h2>Generated SAS PROC SQL Code:</h2>
         <pre>{{ sas_code }}</pre>
@@ -254,7 +262,7 @@ HTML_TEMPLATE = """
         {% if error %}
         <p class="error">{{ error }}</p>
         {% endif %}
-        {% endif %}
+        {% else %}
         {% if success %}
         <p class="success">{{ success }}</p>
         {% endif %}
@@ -285,8 +293,43 @@ def get_table_metadata(table_name):
     conn.close()
     return metadata
 
-def call_grok_api(query, table_name):
-    """Call xAI Grok 3 API to convert natural language query to SAS PROC SQL."""
+def call_mistral_api(prompt):
+    """Call Mistral AI API with the given prompt."""
+    headers = {
+        "Authorization": f"Bearer {MISTRAL_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "mistral-large-latest",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1000,
+        "temperature": 0.3
+    }
+    try:
+        response = requests.post(MISTRAL_API_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        output = result["choices"][0]["message"]["content"].strip()
+        return output
+    except Exception as e:
+        print(f"Error calling Mistral API: {e}")
+        return "Error processing request"
+
+def explain_table(table_name):
+    """Generate an explanation of the table using Mistral AI."""
+    metadata = get_table_metadata(table_name)
+    columns_info = "\n".join([f"- {col['column_name']}: {col['type']} ({col['description']})" for col in metadata])
+    prompt = f"""
+    You are an expert in database analysis. Based on the table name and its column metadata, provide a concise explanation of the table's purpose and structure. Focus on the table's role in a business or system context, inferred from the table name and column names/types/descriptions. Do not include any information unrelated to the table or its metadata. Return only the explanation text.
+
+    Table Name: {table_name}
+    Columns:
+    {columns_info}
+    """
+    return call_mistral_api(prompt)
+
+def generate_sas_query(query, table_name):
+    """Convert natural language query to SAS PROC SQL using Mistral AI."""
     metadata = get_table_metadata(table_name)
     columns_info = "\n".join([f"- {col['column_name']}: {col['type']} ({col['description']})" for col in metadata])
     prompt = f"""
@@ -300,29 +343,11 @@ def call_grok_api(query, table_name):
     - If column names are not explicitly mentioned, infer them based on the query and metadata.
     - If the query is ambiguous, make reasonable assumptions and document them in comments.
     - If the query cannot be converted to a valid SAS PROC SQL query, return exactly: "Query cannot be converted to SAS PROC SQL".
-    - Return only the SAS PROC SQL code or the error message, without additional text.
+    - Return only the SAS PROC SQL code or the error message, without additional text or unrelated content.
 
     Query: {query}
     """
-    headers = {
-        "Authorization": f"Bearer {XAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "grok-3",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 500,
-        "temperature": 0.3
-    }
-    try:
-        response = requests.post(XAI_API_URL, json=payload, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-        output = result["choices"][0]["message"]["content"].strip()
-        return output
-    except Exception as e:
-        print(f"Error calling xAI API: {e}")
-        return "Query cannot be converted to SAS PROC SQL"
+    return call_mistral_api(prompt)
 
 def save_sas_file(sas_code):
     """Save SAS code to a file and return the filename."""
@@ -360,6 +385,36 @@ def set_table():
         success=f"Table '{table_name}' selected."
     )
 
+@app.route("/explain_table", methods=["POST"])
+def explain_table_route():
+    global table_name
+    tables = get_tables()
+    if not table_name:
+        return render_template_string(
+            HTML_TEMPLATE,
+            table_name=table_name,
+            tables=tables,
+            error="Please select a table first."
+        )
+    
+    explanation = explain_table(table_name)
+    if explanation == "Error processing request":
+        return render_template_string(
+            HTML_TEMPLATE,
+            table_name=table_name,
+            tables=tables,
+            metadata=get_table_metadata(table_name),
+            error="Failed to generate table explanation."
+        )
+    
+    return render_template_string(
+        HTML_TEMPLATE,
+        table_name=table_name,
+        tables=tables,
+        metadata=get_table_metadata(table_name),
+        explanation=explanation
+    )
+
 @app.route("/generate_query", methods=["POST"])
 def generate_query():
     global table_name
@@ -382,7 +437,7 @@ def generate_query():
             error="Query cannot be empty."
         )
     
-    sas_code = call_grok_api(query, table_name)
+    sas_code = generate_sas_query(query, table_name)
     if sas_code == "Query cannot be converted to SAS PROC SQL":
         return render_template_string(
             HTML_TEMPLATE,
@@ -425,3 +480,4 @@ if __name__ == "__main__":
     public_url = ngrok.connect(5000).public_url
     print(f"Flask app running at: {public_url}")
     app.run(port=5000)
+    PXK7l7X7INXRfgihvJVjZJ8ZSsgDrDUk
