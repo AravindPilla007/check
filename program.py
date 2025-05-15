@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 # Gemini API key (replace with your actual API key or use environment variable)
 GEMINI_API_KEY = "your_gemini_api_key_here"  # Set this in Colab or use os.environ
-MODEL_NAME = "gemini-1.5-flash"  # Use Gemini 1.5 Flash for generous free tier
+MODEL_NAME = "gemini-1.5-flash"
 
 # Configure Gemini API
 genai.configure(api_key=GEMINI_API_KEY)
@@ -27,15 +27,15 @@ current_sas_file = None
 # Store table name globally
 table_name = None
 
-# Cache for table explanations
+# Cache for table explanations and suggestions
 explanation_cache = {}
+suggestions_cache = {}
 
 def init_db():
     """Initialize SQLite database and populate with 20 tables' metadata."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # Create tables
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tables (
             table_name TEXT PRIMARY KEY
@@ -52,7 +52,6 @@ def init_db():
         )
     """)
 
-    # 20 tables' metadata
     tables_data = [
         ("sales_data", [
             ("sale_id", "numeric", "Unique sale identifier"),
@@ -179,11 +178,9 @@ def init_db():
         ])
     ]
 
-    # Clear existing data
     cursor.execute("DELETE FROM columns")
     cursor.execute("DELETE FROM tables")
 
-    # Insert tables and columns
     for table_name, columns in tables_data:
         cursor.execute("INSERT OR IGNORE INTO tables (table_name) VALUES (?)", (table_name,))
         for col_name, col_type, col_desc in columns:
@@ -195,88 +192,119 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Initialize database
 init_db()
 
-# HTML template for the interface
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>SAS Query Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f9; }
-        h1 { color: #333; }
-        .container { max-width: 800px; margin: auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        .form-group { margin-bottom: 20px; }
-        label { font-weight: bold; display: block; margin-bottom: 5px; }
-        select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
-        textarea { height: 100px; resize: vertical; }
-        button { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background-color: #218838; }
-        pre { background: #f8f8f8; padding: 15px; border-radius: 4px; overflow-x: auto; }
-        .error { color: red; }
-        .success { color: green; }
-        .metadata { font-size: 0.9em; color: #555; }
-        .explanation { font-size: 1em; color: #333; margin-top: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
+        .column-row { display: none; }
+        .column-row.visible { display: table-row; }
+        .suggestion { cursor: pointer; }
+        .suggestion:hover { background-color: #e5e7eb; }
     </style>
 </head>
-<body>
-    <div class="container">
-        <h1>Welcome to SAS Query Generator</h1>
+<body class="bg-gray-100 font-sans">
+    <div class="container max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">Welcome to SAS Query Generator</h1>
         {% if not table_name %}
-        <div class="form-group">
-            <form method="POST" action="/set_table">
-                <label for="table_name">Select Table:</label>
-                <select id="table_name" name="table_name" required>
+        <div class="mb-6">
+            <form method="POST" action="/set_table" class="space-y-4">
+                <label for="table_name" class="block text-sm font-medium text-gray-700">Select Table</label>
+                <select id="table_name" name="table_name" required class="w-full p-2 border rounded-md">
                     {% for table in tables %}
                     <option value="{{ table }}">{{ table }}</option>
                     {% endfor %}
                 </select>
-                <button type="submit">Set Table</button>
+                <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600">Set Table</button>
             </form>
         </div>
         {% else %}
-        <p><strong>Selected Table:</strong> {{ table_name }}</p>
-        <div class="metadata">
-            <h3>Table Metadata</h3>
-            <table>
-                <tr><th>Column</th><th>Type</th><th>Description</th></tr>
-                {% for col in metadata %}
-                <tr><td>{{ col.column_name }}</td><td>{{ col.type }}</td><td>{{ col.description }}</td></tr>
-                {% endfor %}
+        <p class="text-lg font-semibold text-gray-800 mb-4"><strong>Selected Table:</strong> {{ table_name }}</p>
+        <div class="mb-6">
+            <h3 class="text-xl font-semibold text-gray-800 mb-2">Table Metadata</h3>
+            <div class="flex items-center mb-4">
+                <input id="column-search" type="text" placeholder="Search columns..." class="w-full p-2 border rounded-md">
+                <button onclick="searchColumns()" class="ml-2 bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">Search</button>
+            </div>
+            <table class="w-full border-collapse border">
+                <thead>
+                    <tr class="bg-gray-200">
+                        <th class="border p-2">Column</th>
+                        <th class="border p-2">Type</th>
+                        <th class="border p-2">Description</th>
+                    </tr>
+                </thead>
+                <tbody id="column-table">
+                    {% for col in metadata %}
+                    <tr class="column-row">
+                        <td class="border p-2">{{ col.column_name }}</td>
+                        <td class="border p-2">{{ col.type }}</td>
+                        <td class="border p-2">{{ col.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
             </table>
         </div>
-        <div class="form-group">
-            <form method="POST" action="/explain_table" style="display: inline;">
-                <button type="submit">Explain Table</button>
-            </form>
-            <form method="POST" action="/generate_query" style="display: inline;">
-                <label for="query">Enter your query in simple English:</label>
-                <textarea id="query" name="query" required></textarea>
-                <button type="submit">Generate SAS Query</button>
+        <div class="mb-6">
+            <h3 class="text-xl font-semibold text-gray-800 mb-2">Suggested Questions</h3>
+            <ul class="space-y-2">
+                {% for suggestion in suggestions %}
+                <li class="suggestion p-2 rounded-md bg-gray-100" onclick="fillQuery('{{ suggestion|escapejs }}')">{{ suggestion }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        <div class="mb-6">
+            <form method="POST" action="/generate_response" class="space-y-4">
+                <label for="query" class="block text-sm font-medium text-gray-700">Enter your query or type 'explain table'</label>
+                <textarea id="query" name="query" required class="w-full p-2 border rounded-md"></textarea>
+                <button type="submit" class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600">Generate Response</button>
             </form>
         </div>
         {% if explanation %}
-        <h2>Table Explanation</h2>
-        <div class="explanation">{{ explanation }}</div>
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">Table Explanation</h2>
+        <div class="p-4 bg-gray-50 rounded-md">{{ explanation }}</div>
         {% endif %}
         {% if sas_code %}
-        <h2>Generated SAS PROC SQL Code:</h2>
-        <pre>{{ sas_code }}</pre>
-        <a href="/download"><button>Download SAS File</button></a>
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">Generated SAS PROC SQL Code</h2>
+        <pre class="p-4 bg-gray-50 rounded-md overflow-x-auto">{{ sas_code }}</pre>
+        <form method="GET" action="/download">
+            <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">Download SAS File</button>
+        </form>
         {% endif %}
         {% if error %}
-        <p class="error">{{ error }}</p>
+        <p class="text-red-500 mt-4">{{ error }}</p>
         {% endif %}
         {% endif %}
         {% if success %}
-        <p class="success">{{ success }}</p>
+        <p class="text-green-500 mt-4">{{ success }}</p>
         {% endif %}
     </div>
+    <script>
+        function searchColumns() {
+            const input = document.getElementById('column-search').value.toLowerCase();
+            const rows = document.querySelectorAll('#column-table .column-row');
+            rows.forEach((row, index) => {
+                const columnName = row.cells[0].textContent.toLowerCase();
+                row.classList.toggle('visible', columnName.includes(input) || index < 5);
+            });
+        }
+
+        function fillQuery(query) {
+            document.getElementById('query').value = query;
+        }
+
+        // Show first 5 columns by default
+        document.addEventListener('DOMContentLoaded', () => {
+            const rows = document.querySelectorAll('#column-table .column-row');
+            rows.forEach((row, index) => {
+                if (index < 5) row.classList.add('visible');
+            });
+        });
+    </script>
 </body>
 </html>
 """
@@ -369,6 +397,36 @@ def generate_sas_query(query, table_name):
     """
     return call_gemini_api(prompt)
 
+def generate_suggestions(table_name):
+    """Generate 5 relevant suggested questions for the table using Gemini API."""
+    if table_name in suggestions_cache:
+        print(f"Using cached suggestions for {table_name}")
+        return suggestions_cache[table_name]
+    
+    metadata = get_table_metadata(table_name)
+    columns_info = "\n".join([f"- {col['column_name']}: {col['type']} ({col['description']})" for col in metadata])
+    prompt = f"""
+    You are an expert in database analysis. Based on the table name and its column metadata, generate exactly 5 concise, relevant questions that users might ask to query the table in simple English. Each question should be directly related to the table's columns and purpose (e.g., filtering, aggregating, or joining data). Do not include any information unrelated to the table or its metadata. Return the questions as a numbered list in plain text.
+
+    Table Name: {table_name}
+    Columns:
+    {columns_info}
+
+    Example format:
+    1. List all employees with salary greater than 50000
+    2. Show the total sales amount by region
+    3. Find customers who joined after 2023
+    4. Count the number of products in each category
+    5. Retrieve orders placed in the last month
+    """
+    suggestions_text = call_gemini_api(prompt)
+    if suggestions_text == "Error processing request: Too many attempts or rate limit exceeded.":
+        return []
+    suggestions = [line.strip()[3:] for line in suggestions_text.split("\n") if line.strip().startswith(tuple("12345"))]
+    if len(suggestions) == 5:
+        suggestions_cache[table_name] = suggestions
+    return suggestions
+
 def save_sas_file(sas_code):
     """Save SAS code to a file and return the filename."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -381,9 +439,7 @@ def start_ngrok_with_retry(max_attempts=3, delay=5):
     """Start ngrok with retry mechanism to handle ERR_NGROK_3200."""
     for attempt in range(max_attempts):
         try:
-            # Kill any existing ngrok processes
             subprocess.run(["pkill", "ngrok"], check=False)
-            # Start new ngrok tunnel
             public_url = ngrok.connect(5000).public_url
             return public_url
         except Exception as e:
@@ -412,46 +468,18 @@ def set_table():
         )
     table_name = table_name_input
     metadata = get_table_metadata(table_name)
+    suggestions = generate_suggestions(table_name)
     return render_template_string(
         HTML_TEMPLATE,
         table_name=table_name,
         tables=tables,
         metadata=metadata,
+        suggestions=suggestions,
         success=f"Table '{table_name}' selected."
     )
 
-@app.route("/explain_table", methods=["POST"])
-def explain_table_route():
-    global table_name
-    tables = get_tables()
-    if not table_name:
-        return render_template_string(
-            HTML_TEMPLATE,
-            table_name=table_name,
-            tables=tables,
-            error="Please select a table first."
-        )
-    
-    explanation = explain_table(table_name)
-    if explanation == "Error processing request: Too many attempts or rate limit exceeded.":
-        return render_template_string(
-            HTML_TEMPLATE,
-            table_name=table_name,
-            tables=tables,
-            metadata=get_table_metadata(table_name),
-            error="Failed to generate table explanation: API rate limit exceeded. Please wait and try again."
-        )
-    
-    return render_template_string(
-        HTML_TEMPLATE,
-        table_name=table_name,
-        tables=tables,
-        metadata=get_table_metadata(table_name),
-        explanation=explanation
-    )
-
-@app.route("/generate_query", methods=["POST"])
-def generate_query():
+@app.route("/generate_response", methods=["POST"])
+def generate_response():
     global table_name
     tables = get_tables()
     if not table_name:
@@ -469,39 +497,67 @@ def generate_query():
             table_name=table_name,
             tables=tables,
             metadata=get_table_metadata(table_name),
+            suggestions=generate_suggestions(table_name),
             error="Query cannot be empty."
         )
     
-    sas_code = generate_sas_query(query, table_name)
-    if sas_code == "Query cannot be converted to SAS PROC SQL":
+    # Check if the query is asking for table explanation
+    query_lower = query.lower()
+    is_explanation = "explain table" in query_lower or "describe table" in query_lower or "what is this table" in query_lower
+    
+    if is_explanation:
+        explanation = explain_table(table_name)
+        if explanation == "Error processing request: Too many attempts or rate limit exceeded.":
+            return render_template_string(
+                HTML_TEMPLATE,
+                table_name=table_name,
+                tables=tables,
+                metadata=get_table_metadata(table_name),
+                suggestions=generate_suggestions(table_name),
+                error="Failed to generate table explanation: API rate limit exceeded. Please wait and try again."
+            )
         return render_template_string(
             HTML_TEMPLATE,
             table_name=table_name,
             tables=tables,
             metadata=get_table_metadata(table_name),
-            error="Query cannot be converted to SAS PROC SQL."
+            suggestions=generate_suggestions(table_name),
+            explanation=explanation
         )
-    if sas_code == "Error processing request: Too many attempts or rate limit exceeded.":
+    else:
+        sas_code = generate_sas_query(query, table_name)
+        if sas_code == "Query cannot be converted to SAS PROC SQL":
+            return render_template_string(
+                HTML_TEMPLATE,
+                table_name=table_name,
+                tables=tables,
+                metadata=get_table_metadata(table_name),
+                suggestions=generate_suggestions(table_name),
+                error="Query cannot be converted to SAS PROC SQL."
+            )
+        if sas_code == "Error processing request: Too many attempts or rate limit exceeded.":
+            return render_template_string(
+                HTML_TEMPLATE,
+                table_name=table_name,
+                tables=tables,
+                metadata=get_table_metadata(table_name),
+                suggestions=generate_suggestions(table_name),
+                error="Failed to generate SAS query: API rate limit exceeded. Please wait and try again."
+            )
+        
+        # Save the SAS code to a file
+        filename = save_sas_file(sas_code)
+        global current_sas_file
+        current_sas_file = filename
+        
         return render_template_string(
             HTML_TEMPLATE,
             table_name=table_name,
             tables=tables,
             metadata=get_table_metadata(table_name),
-            error="Failed to generate SAS query: API rate limit exceeded. Please wait and try again."
+            suggestions=generate_suggestions(table_name),
+            sas_code=sas_code
         )
-    
-    # Save the SAS code to a file
-    filename = save_sas_file(sas_code)
-    global current_sas_file
-    current_sas_file = filename
-    
-    return render_template_string(
-        HTML_TEMPLATE,
-        table_name=table_name,
-        tables=tables,
-        metadata=get_table_metadata(table_name),
-        sas_code=sas_code
-    )
 
 @app.route("/download", methods=["GET"])
 def download():
@@ -513,12 +569,12 @@ def download():
             table_name=table_name,
             tables=tables,
             metadata=get_table_metadata(table_name) if table_name else [],
+            suggestions=generate_suggestions(table_name) if table_name else [],
             error="No SAS file available for download."
         )
-    return send_file(current_sas_file, as_attachment=True)
+    return send_file(current_sas_file, as_attachment=True, download_name=os.path.basename(current_sas_file))
 
 if __name__ == "__main__":
-    # Update ngrok client
     try:
         subprocess.run(["wget", "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"], check=True)
         subprocess.run(["tar", "-xvzf", "ngrok-v3-stable-linux-amd64.tgz"], check=True)
@@ -526,7 +582,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to update ngrok client: {e}")
     
-    # Start ngrok with retry
     try:
         ngrok.set_auth_token("your_ngrok_authtoken_here")
         public_url = start_ngrok_with_retry()
@@ -535,7 +590,6 @@ if __name__ == "__main__":
         print(f"Error starting ngrok: {e}")
         exit(1)
     
-    # Network diagnostics
     print("Running network diagnostics...")
     subprocess.run(["nslookup", "generativelanguage.googleapis.com"])
     subprocess.run(["ping", "-c", "4", "generativelanguage.googleapis.com"])
